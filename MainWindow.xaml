@@ -1,0 +1,82 @@
+﻿<Window x:Class="CypherBotWPF.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:CypherBotWPF"
+        mc:Ignorable="d"
+        Title="CypherBot - Cybersecurity Awareness Assistant" Height="650" Width="1200">
+    <Grid Background="LightGray">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- LEFT SIDE: Chat Interface -->
+        <StackPanel Grid.Column="0" Margin="20">
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,20">
+                <Image Source="robot.png" Width="50" Height="50" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                <TextBlock Text="CYPHERBOT - Cybersecurity Awareness Assistant"
+                           FontSize="24"
+                           FontWeight="Bold"
+                           VerticalAlignment="Center"
+                           TextWrapping="Wrap"
+                           TextAlignment="Center"/>
+            </StackPanel>
+
+            <RichTextBox x:Name="txtChat"
+                 Height="300"
+                 Width="Auto"
+                 IsReadOnly="True"
+                 VerticalScrollBarVisibility="Auto"
+                 HorizontalScrollBarVisibility="Auto"
+                 Margin="0,0,0,10"
+                 Background="White"/>
+
+            <TextBox x:Name="txtMessage"
+                 Height="35"
+                 Width="Auto"
+                 Margin="0,0,0,10"/>
+
+            <!-- Buttons placed side-by-side -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                <Button Content="Send"
+                        Width="100"
+                        Height="35"
+                        Click="Button_Click"/>
+                <Button Content="Exit"
+                        Width="100"
+                        Height="35"
+                        Margin="10,0,0,0"
+                        Click="ExitButton_Click"/>
+            </StackPanel>
+
+        </StackPanel>
+
+        <!-- RIGHT SIDE: Tasks DataGrid -->
+        <StackPanel Grid.Column="1" Margin="20,20,20,20">
+            <TextBlock Text="Cybersecurity Tasks"
+                       FontSize="18"
+                       FontWeight="Bold"
+                       Margin="0,0,0,10"/>
+
+            <DataGrid x:Name="tasksDataGrid"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      CanUserAddRows="False"
+                      CanUserDeleteRows="False"
+                      GridLinesVisibility="All"
+                      Background="White">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="120"/>
+                    <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="150"/>
+                    <DataGridTextColumn Header="Reminder" Binding="{Binding ReminderText}" Width="80"/>
+                    <DataGridTextColumn Header="Status" Binding="{Binding StatusDisplay}" Width="70"/>
+                    <DataGridTextColumn Header="Created" Binding="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Width="80"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </StackPanel>
+
+    </Grid>
+</Window>
