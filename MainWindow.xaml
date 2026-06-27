@@ -5,14 +5,14 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:CypherBotWPF"
         mc:Ignorable="d"
-        Title="CypherBot - Cybersecurity Awareness Assistant" Height="650" Width="1200">
+        Title="CypherBot" Height="550" Width="1080">
     <Grid Background="LightGray">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="320"/>
         </Grid.ColumnDefinitions>
 
-        <!-- LEFT SIDE: Chat Interface -->
+        <!-- ══════════════ LEFT: the original chat interface (unchanged) ══════════════ -->
         <StackPanel Grid.Column="0" Margin="20">
 
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,20">
@@ -26,17 +26,16 @@
             </StackPanel>
 
             <RichTextBox x:Name="txtChat"
-                 Height="300"
-                 Width="Auto"
+                 Height="350"
+                 Width="650"
                  IsReadOnly="True"
                  VerticalScrollBarVisibility="Auto"
-                 HorizontalScrollBarVisibility="Auto"
                  Margin="0,0,0,10"
                  Background="White"/>
 
             <TextBox x:Name="txtMessage"
                  Height="35"
-                 Width="Auto"
+                 Width="650"
                  Margin="0,0,0,10"/>
 
             <!-- Buttons placed side-by-side -->
@@ -54,28 +53,39 @@
 
         </StackPanel>
 
-        <!-- RIGHT SIDE: Tasks DataGrid -->
-        <StackPanel Grid.Column="1" Margin="20,20,20,20">
-            <TextBlock Text="Cybersecurity Tasks"
-                       FontSize="18"
+        <!-- ══════════════ RIGHT: live view of the tasks database table ══════════════ -->
+        <StackPanel Grid.Column="1" Margin="0,20,20,20">
+
+            <TextBlock Text="📋 Tasks (Database)"
+                       FontSize="16"
                        FontWeight="Bold"
                        Margin="0,0,0,10"/>
 
-            <DataGrid x:Name="tasksDataGrid"
+            <DataGrid x:Name="dgTasks"
+                      Height="420"
                       AutoGenerateColumns="False"
                       IsReadOnly="True"
                       CanUserAddRows="False"
                       CanUserDeleteRows="False"
-                      GridLinesVisibility="All"
-                      Background="White">
+                      HeadersVisibility="Column"
+                      GridLinesVisibility="Horizontal"
+                      Background="White"
+                      RowBackground="White"
+                      AlternatingRowBackground="#F0F0F0"
+                      FontSize="11">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="120"/>
-                    <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="150"/>
-                    <DataGridTextColumn Header="Reminder" Binding="{Binding ReminderText}" Width="80"/>
-                    <DataGridTextColumn Header="Status" Binding="{Binding StatusDisplay}" Width="70"/>
-                    <DataGridTextColumn Header="Created" Binding="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Width="80"/>
+                    <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="30"/>
+                    <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="100"/>
+                    <DataGridTextColumn Header="Reminder" Binding="{Binding ReminderText}" Width="70"/>
+                    <DataGridCheckBoxColumn Header="Done" Binding="{Binding IsCompleted}" Width="40"/>
                 </DataGrid.Columns>
             </DataGrid>
+
+            <Button Content="Refresh"
+                    Height="30"
+                    Margin="0,10,0,0"
+                    Click="RefreshTasksButton_Click"/>
+
         </StackPanel>
 
     </Grid>

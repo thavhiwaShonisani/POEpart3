@@ -1,4 +1,5 @@
 ﻿using System.Speech.Synthesis;
+using System.Collections.ObjectModel;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -29,8 +30,8 @@ namespace CypherBotWPF
         // ── Task 2: Quiz mini-game ──────────────────────────────────────────
         QuizManager quiz = new QuizManager();
 
-        // ── Task 1: Task Assistant — in-memory task/reminder storage ───────
-        private TaskDatabaseManager taskManager = new TaskDatabaseManager();
+        // ── Task 1: Task Assistant — MySQL-backed task/reminder storage ────
+        TaskDatabaseManager taskDb = new TaskDatabaseManager();
         int pendingTaskId = -1;                 // Id of the task awaiting a yes/no reminder prompt
         string? pendingTaskTitle = null;        // Title of that task, used in chat messages
         bool awaitingReminderTimeframe = false; // true once the user said "yes" and we're waiting for a timeframe
@@ -59,6 +60,13 @@ namespace CypherBotWPF
 
         // ── Task 4: Activity log ────────────────────────────────────────────
         ActivityLogManager activityLog = new ActivityLogManager();
+
+        // ── Live view of the tasks table, bound to the DataGrid in the XAML ─
+        ObservableCollection<TaskItem> taskGridItems = new ObservableCollection<TaskItem>();
+
+        // ── Tracks whether the user has entered their name yet, so we know
+        //    when to show the welcome menu for the first time. ─────────────
+        bool hasShownMenu = false;
 
         // ═════════════════════════════════════════════════════════════════
         //  KEYWORD → LIST OF RESPONSES  (varied, randomly selected)
@@ -673,12 +681,26 @@ namespace CypherBotWPF
             InitializeComponent();
             speech.Volume = 100;
             speech.Rate = 0;
+            dgTasks.ItemsSource = taskGridItems;
 
             Loaded += (s, e) =>
             {
                 AppendColoredText(txtChat, "CypherBot", "Hello! I'm CYPHERBOT, your cybersecurity awareness assistant. Please enter your name to get started.", Brushes.Green);
                 Speak("Hello! I'm CypherBot, your cybersecurity awareness assistant. Please tell me your name.");
-                RefreshTasksDataGrid();  // Initialize the DataGrid with existing tasks
+
+                // Task 1: set up the MySQL database/table on first run.
+                bool dbReady = taskDb.EnsureDatabaseAndTable();
+                if (!dbReady)
+                {
+                    string dbWarning = "Note: I couldn't connect to the MySQL database, so task storage is unavailable right now. " +
+                                        "You can still use the quiz, NLP commands, and activity log. " +
+                                        "(Check the connection settings in TaskDatabaseManager.cs.)";
+                    AppendColoredText(txtChat, "CypherBot", dbWarning, Brushes.OrangeRed);
+                }
+                else
+                {
+                    RefreshTaskGrid();
+                }
             };
         }
 
@@ -696,16 +718,10 @@ namespace CypherBotWPF
             AppendColoredText(txtChat, userName, userText, Brushes.DodgerBlue);
             txtMessage.Clear();
 
-            // ── Exit ─────────────────────────────────────────────────────
-            if (message == "exit")
-            {
-                string bye = "Goodbye! Stay safe online!";
-                AppendColoredText(txtChat, "CypherBot", bye, Brushes.Green);
-                Speak(bye);
-                Thread.Sleep(800);
-                Application.Current.Shutdown();
-                return;
-            }
+            // (Typed "exit" no longer shuts down the app — see the
+            // UNIVERSAL ESCAPE block below, which cancels whatever you're
+            // doing and returns you to the menu instead. The Exit BUTTON
+            // still closes the app, via ExitButton_Click.)
 
             // ── Store name (from reference code) ─────────────────────────
             // If name hasn't been set yet, treat first input as the name
@@ -719,13 +735,10 @@ namespace CypherBotWPF
                     return;
                 }
                 memory["name"] = userText;
-                string reply = "Nice to meet you, " + userText + "! I'll remember your name. You can ask me about passwords, phishing, malware, privacy, and more.";
+                string reply = "Nice to meet you, " + userText + "! I'll remember your name.";
                 AppendColoredText(txtChat, "CypherBot", reply, Brushes.Green);
                 Speak(reply);
-
-                // Display the menu of available options
-                string menu = GenerateOptionsMenu();
-                AppendColoredText(txtChat, "CypherBot", menu, Brushes.Green);
+                ShowMainMenu();
                 return;
             }
 
@@ -735,9 +748,35 @@ namespace CypherBotWPF
                 string name = userText.Substring(
                     userText.IndexOf("my name is", StringComparison.OrdinalIgnoreCase) + 10).Trim();
                 memory["name"] = name;
-                string reply = "Nice to meet you, " + name + "! I'll remember your name. You can ask me about passwords, phishing, malware, privacy, and more.";
+                string reply = "Nice to meet you, " + name + "! I'll remember your name.";
                 AppendColoredText(txtChat, "CypherBot", reply, Brushes.Green);
                 Speak(reply);
+                return;
+            }
+
+            // ═════════════════════════════════════════════════════════════
+            //  UNIVERSAL ESCAPE — lets the user back out of whatever they're
+            //  doing (quiz, adding a task, setting a reminder) at any point
+            //  and return to the main menu, instead of needing to remember
+            //  a mode-specific cancel command.
+            // ═════════════════════════════════════════════════════════════
+            if (message == "exit" || message == "cancel" || message == "menu" || message == "help" ||
+                message == "go back" || message == "main menu" || message == "show menu")
+            {
+                bool wasDoingSomething = quiz.IsActive || pendingTaskId != -1 || awaitingReminderTimeframe;
+
+                if (quiz.IsActive) quiz.EndQuiz();
+                pendingTaskId = -1;
+                pendingTaskTitle = null;
+                awaitingReminderTimeframe = false;
+
+                if (wasDoingSomething)
+                {
+                    string cancelMsg = "No problem, I've stopped that.";
+                    AppendColoredText(txtChat, "CypherBot", cancelMsg, Brushes.Green);
+                    activityLog.AddEntry("User exited the current activity.");
+                }
+                ShowMainMenu();
                 return;
             }
 
@@ -803,7 +842,8 @@ namespace CypherBotWPF
                     if (timeframe != null)
                     {
                         // Combined reply, e.g. "Yes, remind me in 3 days."
-                        taskManager.SetReminder(pendingTaskId, timeframe);
+                        taskDb.SetReminder(pendingTaskId, timeframe);
+                        RefreshTaskGrid();
                         string confirm = $"Got it! I'll remind you in {timeframe}.";
                         AppendColoredText(txtChat, "CypherBot", confirm, Brushes.Green);
                         Speak(confirm);
@@ -827,7 +867,8 @@ namespace CypherBotWPF
             if (awaitingReminderTimeframe && pendingTaskId != -1)
             {
                 string timeframe = ExtractReminderTimeframe(message) ?? userText;
-                taskManager.SetReminder(pendingTaskId, timeframe);
+                taskDb.SetReminder(pendingTaskId, timeframe);
+                RefreshTaskGrid();
                 string confirmReminder = $"Got it! I'll remind you in {timeframe}.";
                 AppendColoredText(txtChat, "CypherBot", confirmReminder, Brushes.Green);
                 Speak(confirmReminder);
@@ -863,7 +904,7 @@ namespace CypherBotWPF
             if (message.Contains("quiz") || message.Contains("play a game") || message.Contains("test my knowledge"))
             {
                 quiz.StartQuiz();
-                string intro = "Let's test your cybersecurity knowledge! I'll ask you a series of questions — answer with the letter (A-D) or True/False. (You can exit anytime by typing 'exit quiz', 'quit quiz', 'stop quiz', or 'cancel quiz')";
+                string intro = "Let's test your cybersecurity knowledge! I'll ask you a series of questions — answer with the letter (A-D) or True/False.";
                 AppendColoredText(txtChat, "CypherBot", intro, Brushes.Green);
                 Speak(intro);
                 AppendColoredText(txtChat, "CypherBot", quiz.GetCurrentQuestionFormatted(), Brushes.Green);
@@ -878,7 +919,7 @@ namespace CypherBotWPF
             // ═════════════════════════════════════════════════════════════
             if (message.Contains("show tasks") || message.Contains("view tasks") || message.Contains("my tasks") || message == "tasks")
             {
-                var allTasks = taskManager.GetAllTasks();
+                var allTasks = taskDb.GetAllTasks();
                 if (allTasks.Count == 0)
                 {
                     string noTasks = "You don't have any tasks yet. Try saying \"Add task - Enable two-factor authentication\".";
@@ -904,19 +945,19 @@ namespace CypherBotWPF
                     return;
                 }
 
-                var match = taskManager.FindTaskByTitleFragment(titleFragment);
+                var match = taskDb.FindTaskByTitleFragment(titleFragment);
                 if (match == null)
                 {
                     AppendColoredText(txtChat, "CypherBot", $"I couldn't find a task matching '{titleFragment}'.", Brushes.Green);
                     return;
                 }
 
-                taskManager.DeleteTask(match.Id);
+                taskDb.DeleteTask(match.Id);
+                RefreshTaskGrid();
                 string deleteReply = $"Deleted task: '{match.Title}'.";
                 AppendColoredText(txtChat, "CypherBot", deleteReply, Brushes.Green);
                 Speak(deleteReply);
                 activityLog.AddEntry($"Task deleted: '{match.Title}'.");
-                RefreshTasksDataGrid();  // Refresh to remove the deleted task
                 return;
             }
 
@@ -931,19 +972,19 @@ namespace CypherBotWPF
                     return;
                 }
 
-                var match = taskManager.FindTaskByTitleFragment(titleFragment);
+                var match = taskDb.FindTaskByTitleFragment(titleFragment);
                 if (match == null)
                 {
                     AppendColoredText(txtChat, "CypherBot", $"I couldn't find a task matching '{titleFragment}'.", Brushes.Green);
                     return;
                 }
 
-                taskManager.MarkCompleted(match.Id);
+                taskDb.MarkCompleted(match.Id);
+                RefreshTaskGrid();
                 string completeReply = $"Great work! Marked '{match.Title}' as completed.";
                 AppendColoredText(txtChat, "CypherBot", completeReply, Brushes.Green);
                 Speak(completeReply);
                 activityLog.AddEntry($"Task completed: '{match.Title}'.");
-                RefreshTasksDataGrid();  // Refresh to show the updated task status
                 return;
             }
 
@@ -980,8 +1021,15 @@ namespace CypherBotWPF
                     return;
                 }
 
+                if (!taskDb.IsAvailable && !taskDb.EnsureDatabaseAndTable())
+                {
+                    AppendColoredText(txtChat, "CypherBot", "I can't reach the task database right now, so I can't save that reminder.", Brushes.OrangeRed);
+                    return;
+                }
+
                 string fullDescription = BuildTaskDescription(description);
-                int newId = taskManager.AddTask(description, fullDescription, timeframe);
+                int newId = taskDb.AddTask(description, fullDescription, timeframe);
+                RefreshTaskGrid();
 
                 string reply = timeframe != null
                     ? $"Task added: '{description}'. Reminder set for {timeframe}."
@@ -1024,8 +1072,15 @@ namespace CypherBotWPF
                     return;
                 }
 
+                if (!taskDb.IsAvailable && !taskDb.EnsureDatabaseAndTable())
+                {
+                    AppendColoredText(txtChat, "CypherBot", "I can't reach the task database right now, so I can't save that task.", Brushes.OrangeRed);
+                    return;
+                }
+
                 string fullDescription = BuildTaskDescription(description);
-                int newId = taskManager.AddTask(description, fullDescription, null);
+                int newId = taskDb.AddTask(description, fullDescription, null);
+                RefreshTaskGrid();
 
                 string reply = $"Task added with the description \"{fullDescription}\" Would you like a reminder?";
                 AppendColoredText(txtChat, "CypherBot", reply, Brushes.Green);
@@ -1035,7 +1090,6 @@ namespace CypherBotWPF
                 pendingTaskTitle = description;
                 awaitingReminderTimeframe = false;
                 activityLog.AddEntry($"Task added: '{description}'.");
-                RefreshTasksDataGrid();  // Refresh to show the new task
                 return;
             }
 
@@ -1092,15 +1146,6 @@ namespace CypherBotWPF
                     string reply = "Keep exploring " + lastTopic + " — staying informed is your strongest defence!";
                     AppendColoredText(txtChat, "CypherBot", reply, Brushes.Green);
                 }
-                return;
-            }
-
-            // ── Help / Menu Command ───────────────────────────────────────
-            if (message == "help" || message == "menu" || message.Contains("show me options") || 
-                message.Contains("what can you do") || message.Contains("what options"))
-            {
-                string menu = GenerateOptionsMenu();
-                AppendColoredText(txtChat, "CypherBot", menu, Brushes.Green);
                 return;
             }
 
@@ -1223,30 +1268,46 @@ namespace CypherBotWPF
             return $"Complete the task: {title}.";
         }
 
-        // Generate a formatted menu of all available chatbot options
-        private string GenerateOptionsMenu()
+        // ── Displays the list of everything the bot can do, along with the
+        //    exact keywords to trigger each feature. Shown once after the
+        //    user gives their name, and again any time they type "menu",
+        //    "help", or "exit"/"cancel" out of a sub-activity.
+        private void ShowMainMenu()
         {
-            return @"Here's what I can help you with:
+            string menu =
+                "Here's everything I can help you with — just type any of these:\n\n" +
+                "💬 General chat — ask me about passwords, phishing, malware, privacy, VPNs, and more.\n\n" +
+                "📝 Task assistant — \"Add task - [description]\" to create a task, \"show tasks\" to view them all, " +
+                "\"complete task [name]\" or \"delete task [name]\" to manage one.\n\n" +
+                "⏰ Reminders — \"remind me to [task] in [timeframe]\" (e.g. \"remind me to update my password in 3 days\").\n\n" +
+                "🎮 Quiz — type \"quiz\" to test your cybersecurity knowledge.\n\n" +
+                "📜 Activity log — \"show activity log\" or \"what have you done for me\" to see recent actions.\n\n" +
+                "Type \"menu\" any time to see this list again, or \"exit\"/\"cancel\" to stop whatever you're doing and come back here.";
 
-TASK ASSISTANT:
-  • 'Add task - [task name]' — Create a new cybersecurity task
-  • 'Show tasks' — View all your tasks
-  • 'Delete task - [task name]' — Remove a task
-  • 'Complete task - [task name]' — Mark a task as done
+            AppendColoredText(txtChat, "CypherBot", menu, Brushes.Green);
+        }
 
-QUIZ:
-  • 'Quiz' or 'Play a game' — Test your cybersecurity knowledge (12 questions)
-  • 'Exit quiz' or 'Stop quiz' — Exit the quiz anytime if you want to stop
 
-ACTIVITY LOG:
-  • 'Activity log' — See recent actions
-  • 'Show full log' — View complete history
+        // ── Reloads the tasks table from the database into the
+        //    ObservableCollection bound to the DataGrid in the XAML,
+        //    so the side panel always reflects what's actually stored.
+        //    Called after every Add/Reminder/Complete/Delete action.
+        private void RefreshTaskGrid()
+        {
+            if (!taskDb.IsAvailable) return;
 
-GENERAL HELP:
-  • Ask me about: passwords, phishing, malware, encryption, 2FA, VPN, backup, firewall, data breach, and more!
-  • 'Help' — Show this menu again
+            var allTasks = taskDb.GetAllTasks();
+            taskGridItems.Clear();
+            foreach (var task in allTasks)
+            {
+                taskGridItems.Add(task);
+            }
+        }
 
-Type any command above or ask a question about cybersecurity!";
+        // Lets the user manually refresh the side panel via the Refresh button.
+        private void RefreshTasksButton_Click(object sender, RoutedEventArgs e)
+        {
+            RefreshTaskGrid();
         }
 
         // Add colored text to RichTextBox
@@ -1284,21 +1345,6 @@ Type any command above or ask a question about cybersecurity!";
             Speak(bye);
             Thread.Sleep(800);
             Application.Current.Shutdown();
-        }
-
-        // Refresh the DataGrid with the latest tasks from the database
-        private void RefreshTasksDataGrid()
-        {
-            try
-            {
-                var allTasks = taskManager.GetAllTasks();
-                tasksDataGrid.ItemsSource = null;  // Clear existing binding
-                tasksDataGrid.ItemsSource = allTasks;
-            }
-            catch (Exception ex)
-            {
-                // Silently fail if database is unavailable
-            }
         }
     }
 }
